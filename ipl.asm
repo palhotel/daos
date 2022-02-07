@@ -66,7 +66,7 @@ next:
 		ADD		CL,1			; 往CL里面加1
 		CMP		CL,18			; 比较CL与18
 		JBE		readloop		; CL <= 18 跳转到readloop
-		MOV		CL,1
+		MOV		CL,1			; 恢复到扇区1
 		ADD		DH,1
 		CMP		DH,2
 		JB		readloop		; DH < 2 跳转到readloop
@@ -75,9 +75,9 @@ next:
 		CMP		CH,CYLS
 		JB		readloop		; CH < CYLS 跳转到readloop
 
-; 读取完毕，跳转到haribote.sys执行！
-		MOV		[0x0ff0],CH		;
-		JMP		0xc200
+; 读取完毕，跳转到daos.sys执行！
+		MOV		[0x0ff0],CH		; 记录读了多少个柱面，在asmhead中使用
+		JMP		0xc200			; 0x8000 + 0x4200，将sys文件从4200开始粘贴
 
 error:
 		MOV		SI,msg
