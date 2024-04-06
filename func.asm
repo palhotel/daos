@@ -1,4 +1,5 @@
   ; [FORMAT "WCOFF"]
+  ; just like C library
   [BITS 32]
 
   GLOBAL io_hlt, write_mem8     ; 程序中包含函数名
