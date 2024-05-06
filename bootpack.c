@@ -64,8 +64,8 @@ void main(void) {
   putfont8(vram, 320, 100, 100, 13, ascii_bitmap, 'A');
   putfont8(vram, 320, 110, 100, 13, ascii_bitmap, 'Z');
   
-
-  putstring(vram, 320, 30, 50, 13, ascii_bitmap, "NB\0", 2); //栈或者参数长度有限制
+  char strbuf[16]="Hello, World";
+  putstring(vram, 320, 30, 50, 13, ascii_bitmap, strbuf, 16); //栈或者参数长度有限制
   for(;;){
     io_hlt();
   }
@@ -327,8 +327,11 @@ void putfont8(char *vram, int xsize, int x, int y, char c, int* pbitmaps, int as
   }
 }
 void putstring(char* vram, int xsize, int x, int y, char c, int* pbitmaps, char* str, int len){
-  int fontsize = 10;
+  int fontsize = 12;
   for(int i = 0; i < len; i++){
+    if(str[i] == '\0'){
+      break;
+    }
     putfont8(vram, xsize, x + fontsize * i, y, c, pbitmaps, str[i]);
   }
 }
