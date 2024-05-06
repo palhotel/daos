@@ -5,7 +5,7 @@ CYLS	EQU		10
 
 ; 标准FAT12格式软盘专用的代码 Stand FAT12 format floppy code
 
-		JMP		entry
+		JMP		mainprogram
 		DB		0x90
 		DB		"HELLOIPL"		; 启动扇区名称（8字节）
 		DW		512				; 每个扇区（sector）大小（必须512字节）
@@ -28,7 +28,7 @@ CYLS	EQU		10
 
 ; 程序主体
 
-entry:
+mainprogram:
 		MOV		AX,0			; 初始化寄存器
 		MOV		SS,AX
 		MOV		SP,0x7c00

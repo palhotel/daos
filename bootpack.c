@@ -26,8 +26,11 @@ extern struct font_index_desc glyph_dsc[];
 void putfont8(char* vram, int xsize, int x, int y, char c, int* pbitmaps, int ascii);
 void putstring(char* vram, int xsize, int x, int y, char c, int* pbitmaps, char* str, int len);
 
+void test(){
 
-void _DAOS_Main(void) {
+}
+
+void main(void) {
   int i;
   char *p;
   short *binfo_scrnx, *binfo_scrny;
