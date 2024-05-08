@@ -1,14 +1,20 @@
 ifndef GCCPREFIX
-GCCPREFIX :=
+GCCPREFIX :=x86_64-elf-
 endif
 
 AS		:= nasm
 CC		:= $(GCCPREFIX)gcc
 LD		:= $(GCCPREFIX)ld
 OBJCOPY	:= $(GCCPREFIX)objcopy
-CFLAGS	:= -Wall -m32
+AR		:= $(GCCPREFIX)ar
+CFLAGS	:= -Wall -static -m32
+CFLAGS += -I ./libc/include
+CFLAGS += -ffunction-sections -nostdlib -nostdinc -fno-builtin -ffreestanding
+CFLAGS += -fno-pie
 QEMU	:= qemu-system-i386
 
+LIBC_OBJS  := libc/stdio/stdio.bin
+#LIBC_OBJS  :=
 OBJS	:= ipl.bin asmhead.bin bootpack.bin func.bin
 SYS		:= daos.sys
 IMG		:= daos.img
@@ -32,10 +38,19 @@ bootpack.bin:
 func.bin:
 	$(AS) -f elf func.asm -o func.bin -l func.lst
 
-daos.sys: asmhead.bin bootpack.bin func.bin
-	$(LD) -m elf_i386 --oformat binary asmhead.bin bootpack.bin func.bin -o daos.sys -T daos.ld
+%.bin: %.asm
+	$(AS) -f elf $< -o $@ -l $(subst .asm,.lst,$<)
 
-image: ipl.bin daos.sys
+%.bin: %.c
+	$(CC) $(CFLAGS) -c $< -o $@
+
+daos.sys: asmhead.bin bootpack.bin func.bin ${LIBC_OBJS}
+	$(LD) -m elf_i386 --oformat binary asmhead.bin bootpack.bin func.bin ${LIBC_OBJS} -o daos.sys -T daos.ld
+
+daos.elf: asmhead.bin bootpack.bin func.bin ${LIBC_OBJS}
+	$(LD) -m elf_i386 asmhead.bin bootpack.bin func.bin ${LIBC_OBJS} -o daos.elf -T daos.ld
+
+image: ipl.bin daos.sys daos.elf
 	dd if=/dev/zero of=$(IMG) bs=512 count=2880
 	dd if=ipl.bin of=$(IMG) bs=512 count=1 conv=notrunc
 	dd if=daos.sys of=$(IMG) seek=33 bs=512 conv=notrunc
@@ -47,7 +62,10 @@ clean:
 	rm -rf *.sys
 	rm -rf *.obj
 	rm -rf *.lst
+	rm -rf libc/**/*.bin
 	rm -rf $(IMG)
+	rm -rf *.a
+	rm -rf *.elf
 
 qemu: clean all
 	$(QEMU) -fda $(IMG) $(QEMU_FLAGS)

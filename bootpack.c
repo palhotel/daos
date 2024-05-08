@@ -1,3 +1,4 @@
+#include<stdio.h>
 //类似glibc
 void io_hlt(void);
 void io_cli(void);
@@ -26,8 +27,8 @@ extern struct font_index_desc glyph_dsc[];
 void putfont8(char* vram, int xsize, int x, int y, char c, int* pbitmaps, int ascii);
 void putstring(char* vram, int xsize, int x, int y, char c, int* pbitmaps, char* str, int len);
 
-void test(){
-
+char* test(){
+  return "test";
 }
 
 void main(void) {
@@ -66,6 +67,10 @@ void main(void) {
   
   char strbuf[16]="Hello, World";
   putstring(vram, 320, 30, 50, 13, ascii_bitmap, strbuf, 16); //栈或者参数长度有限制
+  char strbuf2[16]={0};
+  char pattern[16]="xsize: %d";
+  sprintf(strbuf2, pattern, xsize);
+  putstring(vram, 320, 30, 10, 13, ascii_bitmap, strbuf2, 16);
   for(;;){
     io_hlt();
   }
