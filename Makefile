@@ -1,5 +1,5 @@
 ifndef GCCPREFIX
-GCCPREFIX :=x86_64-elf-
+GCCPREFIX :=
 endif
 
 AS		:= nasm

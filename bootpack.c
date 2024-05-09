@@ -23,9 +23,11 @@ struct font_index_desc
     int ofs_y;         // 字形相对于基线的垂直偏移
 };
 extern int ascii_bitmap[];
+extern int cursor[];
 extern struct font_index_desc glyph_dsc[];
 void putfont8(char* vram, int xsize, int x, int y, char c, int* pbitmaps, int ascii);
 void putstring(char* vram, int xsize, int x, int y, char c, int* pbitmaps, char* str, int len);
+void putcursor(char* vram, int xsize, int x, int y, char c, int* pcursormap);
 
 char* test(){
   return "test";
@@ -71,6 +73,7 @@ void main(void) {
   char pattern[16]="xsize: %d";
   sprintf(strbuf2, pattern, xsize);
   putstring(vram, 320, 30, 10, 13, ascii_bitmap, strbuf2, 16);
+  putcursor(vram, 320, 200, 160, 0, cursor);
   for(;;){
     io_hlt();
   }
@@ -121,6 +124,16 @@ void boxfill8(unsigned char* vram, int xsize, unsigned char c, int x0, int y0, i
   }
 }
 
+int cursor[] = {
+  0xfc,
+  0x88,
+  0x90,
+  0x88,
+  0xc4,
+  0xb2,
+  0x0a,
+  0x06
+};
 int ascii_bitmap[] = {
     /* U+0020 ' ' */
     0x0000, 0x0000, 0x0000, 0x0000, 0x0000, 0x0000, 0x0000, 0x0000, 0x0000, 0x0000, 0x0000, 0x0000, 0x0000, 0x0000, 0x0000, 0x0000,
@@ -338,5 +351,25 @@ void putstring(char* vram, int xsize, int x, int y, char c, int* pbitmaps, char*
       break;
     }
     putfont8(vram, xsize, x + fontsize * i, y, c, pbitmaps, str[i]);
+  }
+}
+
+void putcursor(char* vram, int xsize, int x, int y, char c, int* pcursormap){
+  if(x > xsize - 8){
+    x = xsize - 8;
+  }
+  if(y > xsize * 3 / 4 - 8){
+    y = xsize * 3 / 4 - 8;
+  }
+  int* pfont = pcursormap;
+  int i; 
+  int j;
+  for (i = 0; i < 8; i++){
+    int oneline = pfont[i];
+    for(int j = 7; j >= 0; j--){
+      if( ((oneline >> j) & 1) != 0){
+        vram[(y + i) * xsize + x - j] = c;
+      }
+    }
   }
 }

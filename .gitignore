@@ -2,4 +2,5 @@
 *.sys
 *.obj
 *.lst
+daos.elf
 daos.img
