@@ -9,6 +9,7 @@ OBJCOPY	:= $(GCCPREFIX)objcopy
 AR		:= $(GCCPREFIX)ar
 CFLAGS	:= -Wall -static -m32
 CFLAGS += -I ./libc/include
+CFLAGS += -I ./include
 CFLAGS += -ffunction-sections -nostdlib -nostdinc -fno-builtin -ffreestanding
 CFLAGS += -fno-pie
 QEMU	:= qemu-system-i386
@@ -20,7 +21,7 @@ SYS		:= daos.sys
 IMG		:= daos.img
 
 QEMU_FLAGS :=
-
+QEMU_FLAGS 	+= -no-reboot -d in_asm
 ifdef DEBUG
 QEMU_FLAGS += -gdb tcp::1234 -S
 CFLAGS += -g
@@ -30,7 +31,7 @@ ipl.bin:
 	$(AS) -f bin ipl.asm -o ipl.bin -l ipl.lst
 
 asmhead.bin:
-	$(AS) -f elf asmhead.asm -o asmhead.bin -l asmhead.lst
+	$(AS) -f bin asmhead.asm -o asmhead.bin -l asmhead.lst
 
 bootpack.bin:
 	$(CC) $(CFLAGS) -c bootpack.c -o bootpack.bin
@@ -44,11 +45,15 @@ func.bin:
 %.bin: %.c
 	$(CC) $(CFLAGS) -c $< -o $@
 
-daos.sys: asmhead.bin bootpack.bin func.bin ${LIBC_OBJS}
-	$(LD) -m elf_i386 --oformat binary asmhead.bin bootpack.bin func.bin ${LIBC_OBJS} -o daos.sys -T daos.ld
+kernel.sys: bootpack.bin func.bin ${LIBC_OBJS}
+	$(LD) -m elf_i386 --oformat binary -o kernel.sys -T daos.ld $^
 
-daos.elf: asmhead.bin bootpack.bin func.bin ${LIBC_OBJS}
-	$(LD) -m elf_i386 asmhead.bin bootpack.bin func.bin ${LIBC_OBJS} -o daos.elf -T daos.ld
+daos.sys: asmhead.bin kernel.sys
+	cat asmhead.bin > daos.sys
+	cat kernel.sys >> daos.sys
+
+daos.elf: bootpack.bin func.bin ${LIBC_OBJS}
+	$(LD) -m elf_i386 bootpack.bin func.bin ${LIBC_OBJS} -o daos.elf -T daos.ld
 
 image: ipl.bin daos.sys daos.elf
 	dd if=/dev/zero of=$(IMG) bs=512 count=2880

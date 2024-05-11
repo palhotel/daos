@@ -1,4 +1,18 @@
 #include<stdio.h>
+#include<int.h>
+#define ADR_IDT   0x0026f800
+#define LIMIT_IDT 0x000007ff
+#define ADR_GDT   0x00270000
+#define LIMIT_GDT 0x0000ffff
+
+#define ADR_BOOTPACK    0x00280000
+#define LIMIT_BOOTPACK  0x0007ffff
+
+#define AR_DATA32_RW 0x4092
+#define AR_CODE32_ER 0x409a
+#define AR_INTGATE32 0x008e
+#define ADR_BOOTINFO 0x00000ff0
+
 //类似glibc
 void io_hlt(void);
 void io_cli(void);
@@ -6,12 +20,25 @@ void io_out8(int port, int data);
 int io_load_eflags(void);
 void io_store_eflags(int eflags);
 void write_mem8(int addr, int data);
+//设置中断标志位
+void io_cli(void); //清理，CLI (Clear Interrupt Flag)
+void io_sti(void); //STI（Set Interrupt Flag）
 
-//类似内核函数,函数必须定义在主函数之后，否则找不到入口地址。const变量也会影响入口地址
+//类似内核函数
 void init_palette(void);
 void set_palette(int start, int end, unsigned char *rgb);
 //类似于GDI
 void boxfill8(unsigned char* vram, int xsize, unsigned char c, int x0, int y0, int x1, int y1);
+
+struct BootInfo{
+  char  cyls;
+  char  leds;
+  char  vmode;
+  char  reserve;
+  short scrnx;
+  short scrny;
+  unsigned char *vram;
+};
 
 struct font_index_desc
 {
@@ -29,15 +56,30 @@ void putfont8(char* vram, int xsize, int x, int y, char c, int* pbitmaps, int as
 void putstring(char* vram, int xsize, int x, int y, char c, int* pbitmaps, char* str, int len);
 void putcursor(char* vram, int xsize, int x, int y, char c, int* pcursormap);
 
-char* test(){
-  return "test";
-}
+struct SegmentDescriptor {
+  short limit_low, base_low;
+  char base_mid, access_right;
+  char limit_high, base_high;
+};
+
+struct GateDescriptor {
+  short offset_low, selector;
+  char dw_count, access_right;
+  short offset_high;
+};
+void init_gdtidt(void);
+void init_pic(void);
 
 void main(void) {
   int i;
   char *p;
   short *binfo_scrnx, *binfo_scrny;
   int *binfo_vram;
+  struct BootInfo *binfo = (struct BootInfo *)ADR_BOOTINFO;
+  // GDT/IDT完成初始化，开放CPU中断
+  init_gdtidt();
+  init_pic();
+  io_sti();
   init_palette();
   //boot info
   //0xa0000是左上角的像素点
@@ -57,23 +99,17 @@ void main(void) {
   boxfill8(vram, 320, 7, 135, 120, 155, 140);
 
   //绘制字符
-  putfont8(vram, 320, 30, 100, 13, ascii_bitmap, 'D'); 
-  putfont8(vram, 320, 40, 100, 13, ascii_bitmap, 'C'); 
-  putfont8(vram, 320, 50, 100, 13, ascii_bitmap, 'T');
-  putfont8(vram, 320, 60, 100, 13, ascii_bitmap, 'v');
-  putfont8(vram, 320, 70, 100, 13, ascii_bitmap, '5');
-  putfont8(vram, 320, 80, 100, 13, ascii_bitmap, ',');
-  putfont8(vram, 320, 90, 100, 13, ascii_bitmap, 'D');
-  putfont8(vram, 320, 100, 100, 13, ascii_bitmap, 'A');
-  putfont8(vram, 320, 110, 100, 13, ascii_bitmap, 'Z');
-  
   char strbuf[16]="Hello, World";
-  putstring(vram, 320, 30, 50, 13, ascii_bitmap, strbuf, 16); //栈或者参数长度有限制
-  char strbuf2[16]={0};
-  char pattern[16]="xsize: %d";
-  sprintf(strbuf2, pattern, xsize);
-  putstring(vram, 320, 30, 10, 13, ascii_bitmap, strbuf2, 16);
-  putcursor(vram, 320, 200, 160, 0, cursor);
+  putstring(vram, 320, 30, 50, 13, ascii_bitmap, strbuf, 16); 
+  int mx = (binfo->scrnx - 16) / 2;
+  int my = (binfo->scrny - 28 - 16) / 2;
+  char kvmstr[16] = {0};
+  sprintf(kvmstr, "(%d, %d)", mx, my);
+  putstring(vram, 320, 200, 5, 13, ascii_bitmap, kvmstr, 16); 
+  putcursor(vram, 320, mx, my, 0, cursor);
+  io_out8(PIC0_IMR, 0xf9); // 开放PIC1以及键盘中断
+  io_out8(PIC1_IMR, 0xef); // 开放鼠标中断
+
   for(;;){
     io_hlt();
   }
@@ -373,3 +409,97 @@ void putcursor(char* vram, int xsize, int x, int y, char c, int* pcursormap){
     }
   }
 }
+
+void init_pic(void) {
+  //PIC0: Master, PIC1: Slave
+  //ICW：initial control word
+  // 禁止所有中断
+  io_out8(PIC0_IMR, 0xff);
+  io_out8(PIC1_IMR, 0xff);
+
+  io_out8(PIC0_ICW1, 0x11); // 边缘触发模式 固定值
+  io_out8(PIC0_ICW2, 0x20); // IRQ0-7由INT20-27接收 设置中断号
+  io_out8(PIC0_ICW3, 1 << 2); // PIC1由IRQ2连接 主从连接设定 00000100 第三个管脚s
+  io_out8(PIC0_ICW4, 0x01); // 无缓冲区模式 固定值
+
+  io_out8(PIC1_ICW1, 0x11); // 边缘触发模式
+  io_out8(PIC1_ICW2, 0x28); // IRQ8-15由INT28-2f接收
+  io_out8(PIC1_ICW3, 2); // PIC1由IRQ2连接 00000010 从PIC这里填写主PIC的管脚
+  io_out8(PIC1_ICW4, 0x01); // 无缓冲区模式
+
+  io_out8(PIC0_IMR, 0xfb); // PIC1以外中断全部禁止
+  io_out8(PIC1_IMR, 0xff); // 禁止全部中断
+}
+void int_handler21(int *esp) {
+  struct BootInfo *binfo = (struct BootInfo *) ADR_BOOTINFO;
+
+  char kvmstr[16] = "keyboard";
+  putstring(binfo->vram, 320, 100, 100, 13, ascii_bitmap, kvmstr, 16); 
+
+	for (;;) {
+		io_hlt();
+	}
+}
+
+void int_handler2c(int *esp) {
+  struct BootInfo *binfo = (struct BootInfo *) ADR_BOOTINFO;
+
+  // boxfill8(binfo->vram, binfo->scrnx, 0, 0, 0, 32 * 8 - 1, 15);
+	// putstring(binfo->vram, binfo->scrnx, 0, 0, 13, ascii_bitmap, "INT 2C (IRQ-12) : PS/2 mouse", 32);
+  char kvmstr[16] = "mousemove";
+  putstring(binfo->vram, 320, 200, 100, 13, ascii_bitmap, kvmstr, 16); 
+	for (;;) {
+		io_hlt();
+	}
+}
+
+void int_handler27(int *esp) {
+	io_out8(PIC0_OCW2, 0x67);
+
+	return;
+}
+
+void init_gdtidt(void) {
+  struct SegmentDescriptor *gdt = (struct SegmentDescriptor *)ADR_GDT;
+  struct GateDescriptor *idt = (struct GateDescriptor *)ADR_IDT;
+
+  for (int i = 0; i <= LIMIT_GDT / 8; i++) {
+    set_segmdesc(gdt + i, 0, 0, 0);
+  }
+
+  set_segmdesc(gdt + 1, 0xffffffff, 0x00000000, AR_DATA32_RW);
+  set_segmdesc(gdt + 2, LIMIT_BOOTPACK, ADR_BOOTPACK, AR_CODE32_ER);
+  load_gdtr(LIMIT_GDT, ADR_GDT);
+
+  for (int i = 0; i <= LIMIT_IDT / 8; i++) {
+    set_gatedesc(idt + i, 0, 0, 0);
+  }
+  load_idtr(LIMIT_IDT, ADR_IDT);
+
+  set_gatedesc(idt + 0x21, (int)asm_int_handler21, 2 * 8, AR_INTGATE32);
+  set_gatedesc(idt + 0x27, (int)asm_int_handler27, 2 * 8, AR_INTGATE32);
+  set_gatedesc(idt + 0x2c, (int)asm_int_handler2c, 2 * 8, AR_INTGATE32);
+}
+
+void set_segmdesc(struct SegmentDescriptor *sd, unsigned int limit, int base, int ar) {
+  if (limit > 0xfffff) {
+    ar |= 0x8000; // G_bit = 1
+    limit /= 0x1000;
+  }
+
+  sd->limit_low = limit & 0xffff;
+  sd->base_low = base & 0xffff;
+  sd->base_mid = (base >> 16) & 0xff;
+  sd->access_right = ar & 0xff;
+  sd->limit_high = ((limit >> 16) & 0x0f) | ((ar >> 8) | 0xf0);
+  sd->base_high = (base >> 24) & 0xff;
+}
+
+void set_gatedesc(struct GateDescriptor *gd, int offset, int selector, int ar) {
+  gd->offset_low = offset & 0xffff;
+  gd->selector = selector;
+  gd->dw_count = (ar >> 8) & 0xff;
+  gd->access_right = ar & 0xff;
+  gd->offset_high = (offset >> 16) & 0xffff;
+}
+
