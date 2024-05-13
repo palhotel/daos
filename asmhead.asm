@@ -69,7 +69,7 @@ pipelineflush:
   MOV   GS, AX
   MOV   SS, AX
 
-; bootpack传递
+; bootpack传递（copy,最后调用memcpy）
   MOV   ESI, bootpack     ; 源
   MOV   EDI, BOTPAK       ; 目标
   MOV   ECX, 512*1024/4

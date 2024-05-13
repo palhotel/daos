@@ -1,5 +1,8 @@
 #include<stdio.h>
 #include<int.h>
+#include<keyboard.h>
+#include<mouse.h>
+
 #define ADR_IDT   0x0026f800
 #define LIMIT_IDT 0x000007ff
 #define ADR_GDT   0x00270000
@@ -23,6 +26,7 @@ void write_mem8(int addr, int data);
 //设置中断标志位
 void io_cli(void); //清理，CLI (Clear Interrupt Flag)
 void io_sti(void); //STI（Set Interrupt Flag）
+void io_stihlt(void);
 
 //类似内核函数
 void init_palette(void);
@@ -70,6 +74,33 @@ struct GateDescriptor {
 void init_gdtidt(void);
 void init_pic(void);
 
+struct KEYBUF keybuf; //暂时不想使用循环队列，循环队列其实也很简单
+struct MOUSEBUF mousebuf;
+
+unsigned char mouse_db[3], mouse_phase;
+
+void wait_KBC_sendready(void) {
+  for (;;) {
+    if ((io_in8(PORT_KEYSTA) & KEYSTA_SEND_NOTREADY) == 0) {
+      break;
+    }
+  }
+}
+
+void init_keyboard(void) {
+  wait_KBC_sendready();
+  io_out8(PORT_KEYCMD, KEYCMD_WRITE_MODE);
+  wait_KBC_sendready();
+  io_out8(PORT_KEYDAT, KBC_MODE);
+}
+
+void enable_mouse(void) {
+  wait_KBC_sendready();
+  io_out8(PORT_KEYCMD, KEYCMD_SENDTO_MOUSE);
+  wait_KBC_sendready();
+  io_out8(PORT_KEYDAT, MOUSECMD_ENABLE);
+}
+
 void main(void) {
   int i;
   char *p;
@@ -105,13 +136,112 @@ void main(void) {
   int my = (binfo->scrny - 28 - 16) / 2;
   char kvmstr[16] = {0};
   sprintf(kvmstr, "(%d, %d)", mx, my);
-  putstring(vram, 320, 200, 5, 13, ascii_bitmap, kvmstr, 16); 
+  putstring(vram, 320, 20, 5, 13, ascii_bitmap, kvmstr, 16); 
   putcursor(vram, 320, mx, my, 0, cursor);
   io_out8(PIC0_IMR, 0xf9); // 开放PIC1以及键盘中断
   io_out8(PIC1_IMR, 0xef); // 开放鼠标中断
 
+  init_keyboard();
+  enable_mouse();
+
+  mouse_phase = 0;
+  int key_shift = 0;
+
   for(;;){
-    io_hlt();
+    io_cli();
+    if(keybuf.next == 0 && mousebuf.next == 0){
+      io_stihlt();
+    } else {
+      if(keybuf.next != 0){
+        int e = keybuf.data[0];
+        keybuf.next -- ;
+        for(int j = 0; j < keybuf.next; j++){
+          //move
+          keybuf.data[j] = keybuf.data[j+1];
+        }
+        io_sti();
+
+        char keyinput = ' ';
+        if (e < 0x80) {
+          if (key_shift == 0) {
+            keyinput = keytable0[e];
+          } else {
+            keyinput = keytable1[e];
+          }
+        }
+        struct BootInfo *binfo = (struct BootInfo *) ADR_BOOTINFO;
+        char kvmstr[16] = {0};
+        sprintf(kvmstr, "%c", (char)keyinput);
+        boxfill8(binfo->vram, 320, 15, 200, 120, 200+64, 120+32);
+        putstring(binfo->vram, 320, 216, 120, 13, ascii_bitmap, kvmstr, 16); 
+      } else if(mousebuf.next != 0){
+        int e = mousebuf.data[0];
+        mousebuf.next -- ;
+        for(int j = 0; j < mousebuf.next; j++){
+          //move
+          mousebuf.data[j] = mousebuf.data[j+1];
+        }
+        io_sti();
+
+        if(mouse_phase == 0){
+          if (e == 0xfa){
+            mouse_phase = 1;
+          }
+        } else if(mouse_phase == 1){
+          if((e & 0xc8) == 0x08){
+            mouse_db[0] = e;
+            mouse_phase = 2;
+          }
+        } else if(mouse_phase == 2){
+          mouse_db[1] = e;
+          mouse_phase = 3;
+        } else if(mouse_phase == 3){
+          mouse_db[2] = e;
+          mouse_phase = 1;
+
+          struct BootInfo *binfo = (struct BootInfo *) ADR_BOOTINFO;
+          char kvmstr[16] = {0};
+          int btn = mouse_db[0] & 0x07;
+          int x = mouse_db[1];
+          int y = mouse_db[2];
+          if(mouse_db[0] & 0x10 != 0){
+            x |= 0xffffff00;
+          }
+          if(mouse_db[0] & 0x20 != 0){
+            y |= 0xffffff00;
+          }
+          y = -y;
+          //clear old cursor
+          boxfill8(binfo->vram, 320, 15, mx-8, my, mx+8, my+16);
+          mx += (char)x;
+          my += (char)y;
+          if(mx < 16){
+            mx = 16;
+          }
+          if(my < 0){
+            my = 0;
+          }
+          if(mx > binfo->scrnx - 16){
+            mx = binfo->scrnx - 16;
+          }
+          if(my > binfo->scrny - 16){
+            my = binfo->scrny - 16;
+          }
+          sprintf(kvmstr, "%d %d %d", btn, x & 0xff, y & 0xff);
+          boxfill8(binfo->vram, 320, 15, 200, 20, 200+120, 20+32);
+          putstring(binfo->vram, 320, 216, 20, 13, ascii_bitmap, kvmstr, 16); 
+
+          //update mouse
+          char mousestr[16] = {0};
+          sprintf(mousestr, "(%d,%d)", mx, my);
+          boxfill8(binfo->vram, 320, 15, 20, 5, 4+100, 5+16);
+          putstring(vram, 320, 20, 5, 13, ascii_bitmap, mousestr, 16); 
+          
+          putcursor(vram, 320, mx, my, 0, cursor);
+        }
+      }
+
+    }
   }
 }
 
@@ -430,27 +560,25 @@ void init_pic(void) {
   io_out8(PIC0_IMR, 0xfb); // PIC1以外中断全部禁止
   io_out8(PIC1_IMR, 0xff); // 禁止全部中断
 }
-void int_handler21(int *esp) {
-  struct BootInfo *binfo = (struct BootInfo *) ADR_BOOTINFO;
 
-  char kvmstr[16] = "keyboard";
-  putstring(binfo->vram, 320, 100, 100, 13, ascii_bitmap, kvmstr, 16); 
-
-	for (;;) {
-		io_hlt();
-	}
-}
-
+//鼠标
 void int_handler2c(int *esp) {
-  struct BootInfo *binfo = (struct BootInfo *) ADR_BOOTINFO;
-
-  // boxfill8(binfo->vram, binfo->scrnx, 0, 0, 0, 32 * 8 - 1, 15);
-	// putstring(binfo->vram, binfo->scrnx, 0, 0, 13, ascii_bitmap, "INT 2C (IRQ-12) : PS/2 mouse", 32);
-  char kvmstr[16] = "mousemove";
-  putstring(binfo->vram, 320, 200, 100, 13, ascii_bitmap, kvmstr, 16); 
-	for (;;) {
-		io_hlt();
-	}
+  io_out8(PIC1_OCW2, 0x64); // 通知PIC1 IRQ-12的受理已经完成
+  io_out8(PIC0_OCW2, 0x62); // 通知PIC0 IRQ-02的受理已经完成
+  unsigned char data = io_in8(PORT_KEYDAT);
+  if(mousebuf.next < 32){
+    mousebuf.data[mousebuf.next] = data;
+    mousebuf.next ++ ;
+  }
+}
+//键盘
+void int_handler21(int *esp) {
+  io_out8(PIC0_OCW2, 0x61); // 通知PIC IRQ-1的受理已经完成
+  unsigned char data = io_in8(PORT_KEYDAT);
+  if(keybuf.next < 32){
+    keybuf.data[keybuf.next] = data;
+    keybuf.next ++ ;
+  }
 }
 
 void int_handler27(int *esp) {
